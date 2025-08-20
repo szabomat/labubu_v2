@@ -1,65 +1,325 @@
 <!DOCTYPE html>
 <html lang="hu">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no, viewport-fit=cover">
 <title>Labubu vadászat</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0f1221">
 <link rel="apple-touch-icon" href="icon-192.png">
 <style>
-body,html{margin:0;padding:0;height:100%;background:#0f1221;color:#fff;font-family:sans-serif;}
-#menu,#overlay{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;background:rgba(0,0,0,0.6);}
+:root{--bg:#0f1221;--ui:rgba(0,0,0,.55);--panel:#161a2e;--text:#eef2ff;}
+html,body{margin:0;height:100%;background:radial-gradient(1200px 800px at 50% -10%, #1b1f34,var(--bg));color:var(--text);font-family:system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;}
+#game{display:block;width:100%;height:100%;touch-action:manipulation;}
+/* HUD */
+#hud{position:fixed;top:calc(env(safe-area-inset-top) + 8px);left:0;right:0;display:flex;gap:8px;justify-content:center;pointer-events:none;}
+.hud-chip{pointer-events:auto;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.18);backdrop-filter:blur(6px);
+  border-radius:14px;padding:8px 12px;font-weight:700;font-size:14px;display:flex;gap:8px;align-items:center;}
+#sound{width:40px;height:40px;border-radius:10px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08);font-size:18px}
+#menu,#overlay{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--ui);backdrop-filter:blur(6px);}
 #menu.hidden,#overlay.hidden{display:none;}
-button{margin:6px;padding:10px 16px;border-radius:8px;border:0;font-weight:bold;}
-#game{display:block;width:100%;height:100%;}
-#timer{position:fixed;top:10px;left:50%;transform:translateX(-50%);font-weight:bold;font-size:20px;}
+.card{width:min(92vw,480px);background:color-mix(in oklab, var(--panel), #ffffff 6%);border:1px solid rgba(255,255,255,.12);border-radius:16px;padding:18px;box-shadow:0 18px 60px rgba(0,0,0,.35)}
+.row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center;margin:8px 0}
+.btn{appearance:none;border:0;padding:10px 14px;border-radius:12px;font-weight:800;background:linear-gradient(#2a2f4d,#1b1e34);color:var(--text);border:1px solid rgba(255,255,255,.12)}
+.btn.accent{background:linear-gradient(#66f09a,#3fb671);color:#08130d}
+.hint{opacity:.7;font-size:12px;text-align:center}
+/* Progress dots */
+#progress{display:flex;gap:8px;justify-content:center;margin-top:6px}
+.dot{width:18px;height:18px;border-radius:50%;border:2px solid rgba(255,255,255,.3)}
+.dot.ok{position:relative}
+.dot.ok::after{content:"✓";position:absolute;inset:-2px;display:grid;place-items:center;font-weight:900;color:#0a0c14;font-size:12px}
 </style>
 </head>
 <body>
-<canvas id="game"></canvas>
-<div id="timer"></div>
-<div id="menu">
-  <h2>Labubu vadászat</h2>
-  <div>
-    <p>Időlimit</p>
-    <button class="time" data-t="20">20 mp</button>
-    <button class="time" data-t="30">30 mp</button>
-    <button class="time" data-t="45">45 mp</button>
-  </div>
-  <div>
-    <p>Nehézség</p>
-    <button class="diff" data-d="slow">Könnyű</button>
-    <button class="diff" data-d="medium">Közepes</button>
-    <button class="diff" data-d="fast">Nehéz</button>
-  </div>
-  <button id="start">Start</button>
+<canvas id="game" aria-label="Labubu pálya"></canvas>
+
+<div id="hud">
+  <div class="hud-chip"><span id="time">00:30</span></div>
+  <div class="hud-chip" id="targets" title="Még begyűjtendő színek"><div id="progress"></div></div>
+  <button id="sound" aria-pressed="false" title="Hang be/ki">🔇</button>
 </div>
-<div id="overlay" class="hidden"><h1 id="msg"></h1><button id="again">Újra</button></div>
+
+<!-- Start menu -->
+<div id="menu" role="dialog" aria-modal="true">
+  <div class="card">
+    <h2 style="margin:4px 0 10px">Labubu vadászat</h2>
+    <div class="row" id="timeRow">
+      <button class="btn time" data-t="20">20 mp</button>
+      <button class="btn time" data-t="30">30 mp</button>
+      <button class="btn time" data-t="45">45 mp</button>
+    </div>
+    <div class="row" id="diffRow">
+      <button class="btn diff" data-d="slow">Könnyű</button>
+      <button class="btn diff" data-d="medium">Közepes</button>
+      <button class="btn diff" data-d="fast">Nehéz</button>
+    </div>
+    <div class="row">
+      <button id="start" class="btn accent">Start</button>
+    </div>
+    <div class="hint">Első érintés után lesz hang.</div>
+  </div>
+</div>
+
+<!-- Result overlay -->
+<div id="overlay" class="hidden" role="dialog" aria-modal="true">
+  <div class="card" style="text-align:center">
+    <h1 id="result">Nyertél!</h1>
+    <div class="row">
+      <button id="again" class="btn accent">Újra</button>
+    </div>
+  </div>
+</div>
+
 <script>
-const canvas=document.getElementById('game'),ctx=canvas.getContext('2d');let W,H,dpr=window.devicePixelRatio||1;
-function resize(){W=canvas.width=innerWidth*dpr;H=canvas.height=innerHeight*dpr;canvas.style.width=innerWidth+'px';canvas.style.height=innerHeight+'px';ctx.setTransform(1,0,0,1,0,0);ctx.scale(dpr,dpr);}resize();addEventListener('resize',resize);
-let goodColors=['#ff4757','#1e90ff','#2ed573','#ffa502','#a55eea','#ff6b81'];
-let badColor='#000000';
-let labubus=[],collected=new Set(),running=false,timer=30,difficulty='medium',speedFactor=2,startTime;
-let overlay=document.getElementById('overlay'),msg=document.getElementById('msg');
-let menu=document.getElementById('menu'),timerEl=document.getElementById('timer');
-let audioCtx=null;function initAudio(){if(!audioCtx){audioCtx=new (window.AudioContext||window.webkitAudioContext)();}}
-function playSound(type){if(!audioCtx)return;let now=audioCtx.currentTime;let o=audioCtx.createOscillator();let g=audioCtx.createGain();o.connect(g).connect(audioCtx.destination);
-if(type==='good'){o.type='triangle';o.frequency.setValueAtTime(440,now);g.gain.setValueAtTime(.3,now);g.gain.exponentialRampToValueAtTime(.001,now+.3);}
-if(type==='bad'){o.type='sawtooth';o.frequency.setValueAtTime(120,now);g.gain.setValueAtTime(.4,now);g.gain.exponentialRampToValueAtTime(.001,now+.5);}
-if(type==='win'){[440,660,880].forEach((f,i)=>{let o2=audioCtx.createOscillator();let g2=audioCtx.createGain();o2.type='sine';o2.frequency.setValueAtTime(f,now+i*0.2);g2.gain.setValueAtTime(.3,now+i*0.2);g2.gain.exponentialRampToValueAtTime(.001,now+.5+i*0.2);o2.connect(g2).connect(audioCtx.destination);o2.start(now+i*0.2);o2.stop(now+.7+i*0.2);});}
-if(type==='lose'){o.type='square';o.frequency.setValueAtTime(200,now);g.gain.setValueAtTime(.3,now);g.gain.exponentialRampToValueAtTime(.001,now+.7);}
-o.start(now);o.stop(now+1);}
-function createLabubu(color,isBad=false){let r=20;let x=Math.random()*(innerWidth-2*r)+r;let y=Math.random()*(innerHeight-2*r)+r;let v= speedFactor;let vx=(Math.random()-.5)*v*4;let vy=(Math.random()-.5)*v*4;return{color,isBad,x,y,vx,vy,r,spawn:Date.now()};}
-function reset(){labubus=[];collected.clear();running=true;startTime=Date.now();overlay.classList.add('hidden');menu.classList.add('hidden');for(let i=0;i<5;i++){let col=goodColors[Math.floor(Math.random()*goodColors.length)];labubus.push(createLabubu(col,false));}}
-function endGame(message,type){running=false;msg.textContent=message;overlay.classList.remove('hidden');playSound(type);}
-canvas.addEventListener('pointerdown',e=>{initAudio();let rect=canvas.getBoundingClientRect();let x=(e.clientX-rect.left);let y=(e.clientY-rect.top);labubus.forEach(l=>{if(!l.collected){let d=Math.hypot(l.x-x,l.y-y);if(d<l.r){if(l.isBad){endGame('Game Over!','bad');}else{l.collected=true;collected.add(l.color);playSound('good');if(collected.size===labubus.filter(b=>!b.isBad).length){endGame('Nyertél!','win');}}}}});});
-function loop(){if(!running)return;ctx.clearRect(0,0,innerWidth,innerHeight);labubus.forEach((l,i)=>{if(!l.collected){l.x+=l.vx;l.y+=l.vy;if(l.x<l.r||l.x>innerWidth-l.r)l.vx*=-1;if(l.y<l.r||l.y>innerHeight-l.r)l.vy*=-1;ctx.beginPath();ctx.fillStyle=l.color;ctx.arc(l.x,l.y,l.r,0,Math.PI*2);ctx.fill();ctx.fillStyle='#000';ctx.beginPath();ctx.arc(l.x-6,l.y-4,3,0,Math.PI*2);ctx.arc(l.x+6,l.y-4,3,0,Math.PI*2);ctx.fill();ctx.fillStyle='#fff';ctx.fillRect(l.x-4,l.y+4,8,3);} });let elapsed=(Date.now()-startTime)/1000;let remain=timer-elapsed;timerEl.textContent=Math.ceil(remain);if(remain<=0){endGame('Idő lejárt!','lose');}if(Math.random()<0.01){labubus.push(createLabubu(badColor,true));}labubus=labubus.filter(l=>!(l.isBad&&(Date.now()-l.spawn>4000)));requestAnimationFrame(loop);}
-document.querySelectorAll('.time').forEach(b=>b.onclick=()=>{timer=parseInt(b.dataset.t)});
-document.querySelectorAll('.diff').forEach(b=>b.onclick=()=>{difficulty=b.dataset.d;if(difficulty==='slow')speedFactor=1;else if(difficulty==='medium')speedFactor=2;else speedFactor=3;});
-document.getElementById('start').onclick=()=>{reset();loop();};
-document.getElementById('again').onclick=()=>{menu.classList.remove('hidden');overlay.classList.add('hidden');};
+// Canvas sizing
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d',{alpha:true});
+let DPR = Math.max(1, Math.min(window.devicePixelRatio||1, 2));
+function fit(){canvas.width = Math.floor(innerWidth*DPR); canvas.height = Math.floor(innerHeight*DPR); canvas.style.width=innerWidth+'px'; canvas.style.height=innerHeight+'px';}
+fit(); addEventListener('resize', fit);
+
+// UI
+const timeEl = document.getElementById('time');
+const progressEl = document.getElementById('progress');
+const menu = document.getElementById('menu');
+const overlay = document.getElementById('overlay');
+const resultEl = document.getElementById('result');
+const soundBtn = document.getElementById('sound');
+document.querySelectorAll('.time').forEach(b=>b.addEventListener('click',()=>{ game.timeLimit = parseInt(b.dataset.t,10); highlightChoice('#timeRow', b); }));
+document.querySelectorAll('.diff').forEach(b=>b.addEventListener('click',()=>{ game.difficulty = b.dataset.d; setDifficulty(); highlightChoice('#diffRow', b);}));
+document.getElementById('start').addEventListener('click', ()=>{startGame();}, {passive:true});
+document.getElementById('again').addEventListener('click', ()=>{menu.classList.remove('hidden'); overlay.classList.add('hidden'); cancelAnimationFrame(game.raf);}, {passive:true});
+function highlightChoice(rowSel, btn){ document.querySelectorAll(rowSel+' .btn').forEach(x=>x.classList.remove('accent')); btn.classList.add('accent'); }
+
+// Audio
+let audioCtx=null, audioOn=false;
+function enableAudio(){ if(!audioCtx){ audioCtx = new (window.AudioContext||window.webkitAudioContext)(); } if(audioCtx.state==='suspended'){audioCtx.resume();} audioOn=true; soundBtn.textContent='🔊'; soundBtn.setAttribute('aria-pressed','true'); }
+soundBtn.addEventListener('click', ()=>{ if(!audioOn) enableAudio(); else {audioOn=false; soundBtn.textContent='🔇'; soundBtn.setAttribute('aria-pressed','false');} });
+canvas.addEventListener('pointerdown', ()=>{ if(!audioOn) enableAudio(); }, {once:true, passive:true});
+
+function beep(type){
+  if(!audioOn||!audioCtx) return;
+  const now = audioCtx.currentTime;
+  const g = audioCtx.createGain(); g.connect(audioCtx.destination);
+  function blip(f,t,d=0.15,a='sine',vol=0.25){
+    const o = audioCtx.createOscillator(); const gg = audioCtx.createGain();
+    o.type=a; o.frequency.setValueAtTime(f, t);
+    gg.gain.setValueAtTime(0.0001, t); gg.gain.exponentialRampToValueAtTime(vol, t+0.02); gg.gain.exponentialRampToValueAtTime(0.0001, t+d);
+    o.connect(gg).connect(g); o.start(t); o.stop(t+d+0.05);
+  }
+  if(type==='good'){ blip(520, now, .12, 'triangle', 0.3); blip(300, now+.14, .11, 'sine', 0.25); }
+  if(type==='bad'){ blip(140, now, .4, 'sawtooth', 0.35); }
+  if(type==='win'){ [660,880,990,1320].forEach((f,i)=> blip(f, now+i*0.12, .12, 'triangle', 0.28)); }
+  if(type==='timeout'){ blip(220, now, .6, 'square', 0.35); }
+}
+
+// Game state
+const COLORS = ['#ff4757','#1e90ff','#2ed573','#ffa502','#a55eea','#ff6b81','#ffd166','#06d6a0','#118ab2'];
+const game = {
+  timeLimit: 30,
+  difficulty: 'medium',
+  speed: 1.8,
+  raf: null,
+  startMs: 0,
+  left: [],
+  actors: [],
+  over: false
+};
+function setDifficulty(){
+  game.speed = (game.difficulty==='slow'? 1.2 : game.difficulty==='fast'? 2.6 : 1.8);
+}
+
+// Labubu model & draw
+function makeLabubu(x,y,color,bad=false){
+  const r = 22 + Math.random()*6;
+  const vx = (Math.random()>.5?1:-1) * (game.speed* (1 + Math.random()*0.4));
+  const vy = (Math.random()>.5?1:-1) * (game.speed* (1 + Math.random()*0.4));
+  return {x,y,vx,vy,r,color,bad,alive:true,spawn:performance.now(),bob:Math.random()*1000};
+}
+function drawLabubu(L, t){
+  const ctx2 = ctx;
+  const px = L.x, py = L.y + Math.sin((t+L.bob)/450)*2; // bobbing
+  const r = L.r;
+  ctx2.save();
+  ctx2.translate(px*DPR, py*DPR); ctx2.scale(DPR,DPR); // HiDPI crisp
+  // glow/outline
+  ctx2.beginPath();
+  ctx2.fillStyle = L.bad ? 'rgba(0,0,0,0.9)' : L.color;
+  ctx2.strokeStyle = 'rgba(0,0,0,.45)';
+  ctx2.lineWidth = 3;
+  // body
+  ctx2.ellipse(0, 0, r*1.0, r*1.1, 0, 0, Math.PI*2);
+  // ears
+  ctx2.ellipse(-r*0.6, -r*1.45, r*0.35, r*0.55, -0.1, 0, Math.PI*2);
+  ctx2.ellipse( r*0.6, -r*1.45, r*0.35, r*0.55, 0.1, 0, Math.PI*2);
+  ctx2.fill(); ctx2.stroke();
+  // inner ear
+  if(!L.bad){
+    ctx2.fillStyle='rgba(255,255,255,.35)';
+    ctx2.ellipse(-r*0.6, -r*1.45, r*0.18, r*0.32, -0.1, 0, Math.PI*2);
+    ctx2.fill();
+    ctx2.ellipse( r*0.6, -r*1.45, r*0.18, r*0.32, 0.1, 0, Math.PI*2);
+    ctx2.fill();
+  }
+  // face
+  // eyes
+  ctx2.fillStyle = L.bad ? '#e11d48' : '#0a0a0a';
+  ctx2.beginPath();
+  ctx2.arc(-r*0.35, -r*0.15, r*0.12, 0, Math.PI*2);
+  ctx2.arc( r*0.35, -r*0.15, r*0.12, 0, Math.PI*2);
+  ctx2.fill();
+  if(!L.bad){
+    ctx2.fillStyle='#fff';
+    ctx2.beginPath();
+    ctx2.arc(-r*0.32, -r*0.19, r*0.04, 0, Math.PI*2);
+    ctx2.arc( r*0.38, -r*0.19, r*0.04, 0, Math.PI*2);
+    ctx2.fill();
+  }
+  // mouth + teeth
+  ctx2.fillStyle = L.bad ? '#111' : '#111';
+  ctx2.beginPath();
+  ctx2.roundRect(-r*0.24, r*0.2, r*0.48, r*0.16, 6);
+  ctx2.fill();
+  if(!L.bad){
+    ctx2.fillStyle = '#fff';
+    const tw = r*0.09, th = r*0.1, top = r*0.2;
+    for(let i=-1;i<=1;i++){
+      ctx2.beginPath();
+      ctx2.moveTo(i*tw*1.6 - tw*0.5, top);
+      ctx2.lineTo(i*tw*1.6, top+th);
+      ctx2.lineTo(i*tw*1.6 + tw*0.5, top);
+      ctx2.closePath();
+      ctx2.fill();
+    }
+  }
+  // specular highlight
+  if(!L.bad){
+    ctx2.fillStyle='rgba(255,255,255,.25)';
+    ctx2.beginPath();
+    ctx2.ellipse(-r*0.5, -r*0.5, r*0.35, r*0.2, -0.6, 0, Math.PI*2);
+    ctx2.fill();
+  }
+  ctx2.restore();
+}
+
+// Spawn logic
+function randomPoint(){
+  const m = 32; return {x: m + Math.random()*(innerWidth - m*2), y: m + Math.random()*(innerHeight - m*2)};
+}
+function setupRound(){
+  game.actors = [];
+  game.left = [];
+  const want = 5; // number of good labubus
+  // choose random unique colors
+  const bag = COLORS.slice(0); for(let i=COLORS.length-1;i>0;i--){ const j=(Math.random()* (i+1))|0; [bag[i],bag[j]]=[bag[j],bag[i]]; }
+  const chosen = bag.slice(0, want);
+  chosen.forEach(c=>{
+    const p = randomPoint(); const L = makeLabubu(p.x,p.y,c,false);
+    game.actors.push(L); game.left.push(c);
+  });
+  // initial bad spawn timer
+  scheduleBad();
+  updateProgress();
+}
+function scheduleBad(){
+  if(game.over) return;
+  const wait = 1000 + Math.random()*2000; // 1–3s
+  setTimeout(()=>{
+    if(game.over) return;
+    const p = randomPoint(); const L = makeLabubu(p.x,p.y,'#000',true);
+    game.actors.push(L);
+    // disappear after 3–5s
+    const ttl = 3000 + Math.random()*2000;
+    setTimeout(()=>{ L.alive=false; }, ttl);
+    scheduleBad();
+  }, wait);
+}
+function updateProgress(){
+  progressEl.innerHTML='';
+  const uniq = [...new Set(game.left)];
+  uniq.forEach(c=>{
+    const d = document.createElement('div'); d.className='dot'; d.style.background = c; progressEl.appendChild(d);
+  });
+}
+
+// Input
+canvas.addEventListener('pointerdown', (e)=>{
+  if(game.over) return;
+  const rect = canvas.getBoundingClientRect();
+  const x = e.clientX - rect.left, y = e.clientY - rect.top;
+  // find topmost actor under pointer
+  for(let i=game.actors.length-1; i>=0; i--){
+    const L = game.actors[i];
+    if(!L.alive) continue;
+    const dx = L.x - x, dy = L.y - y;
+    if(Math.hypot(dx,dy) <= L.r*1.05){
+      if(L.bad){
+        // game over
+        beep('bad'); return end('Game Over!');
+      }else{
+        L.alive=false; // pop
+        // remove one matching color from left
+        const idx = game.left.indexOf(L.color);
+        if(idx>-1) game.left.splice(idx,1);
+        beep('good');
+        updateProgress();
+        if(game.left.length===0) return win(); // immediate win!
+      }
+      break;
+    }
+  }
+}, {passive:true});
+
+// Game loop
+function tick(ts){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  // parallax lines
+  ctx.save(); ctx.scale(DPR,DPR);
+  ctx.fillStyle='rgba(255,255,255,0.03)';
+  const h = innerHeight, w = innerWidth; const t = performance.now()/1000;
+  for(let i=0;i<14;i++){ const y=(t*12 + (i/14)*h)%h; ctx.fillRect(0, y, w, 2); }
+  ctx.restore();
+
+  // physics & draw
+  const b = 10;
+  for(const L of game.actors){
+    if(!L.alive) continue;
+    L.x += L.vx; L.y += L.vy;
+    if(L.x < L.r) {L.x=L.r; L.vx*=-1;}
+    if(L.x > innerWidth - L.r) {L.x=innerWidth - L.r; L.vx*=-1;}
+    if(L.y < L.r) {L.y=L.r; L.vy*=-1;}
+    if(L.y > innerHeight - L.r) {L.y=innerHeight - L.r; L.vy*=-1;}
+    drawLabubu(L, performance.now());
+  }
+
+  // timer
+  const remain = Math.max(0, game.timeLimit*1000 - (performance.now() - game.startMs));
+  timeEl.textContent = fmt(remain/1000);
+  if(remain<=0) { beep('timeout'); return end('Idő lejárt!'); }
+
+  if(!game.over) game.raf = requestAnimationFrame(tick);
+}
+
+function fmt(s){ const m = Math.floor(s/60); const ss = Math.floor(s%60); return (m<10?'0':'')+m+':'+(ss<10?'0':'')+ss; }
+
+function startGame(){
+  game.over=false;
+  setDifficulty();
+  setupRound();
+  updateProgress();
+  menu.classList.add('hidden');
+  overlay.classList.add('hidden');
+  game.startMs = performance.now();
+  cancelAnimationFrame(game.raf);
+  game.raf = requestAnimationFrame(tick);
+}
+function win(){ beep('win'); end('Nyertél!'); }
+function end(text){
+  game.over = true;
+  cancelAnimationFrame(game.raf);
+  resultEl.textContent = text;
+  overlay.classList.remove('hidden');
+}
 </script>
 </body>
 </html>
